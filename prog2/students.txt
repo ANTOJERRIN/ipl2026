@@ -1,0 +1,4 @@
+101,Alice Smith,3.82
+102,Bob,3.45
+103,Alexander Wright,3.91
+104,Li,2.98

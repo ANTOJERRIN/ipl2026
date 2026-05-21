@@ -13,30 +13,26 @@ struct Student {
 void storeRecords(const char *filename, int n);
 void displayMthRecord(const char *filename, int m);
 void deleteRecord(const char *filename, int recordIndex);
-void displayAllRecords(const char *filename); // Helper to see results
+void displayAllRecords(const char *filename);
 
-int main() {
+int main(void) {
     const char *filename = "students.bin";
-    
-    // 1. Store N records
     int n = 4;
+
     printf("--- Storing %d Records ---\n", n);
     storeRecords(filename, n);
-    
+
     printf("\n--- Current File Content ---\n");
     displayAllRecords(filename);
 
-    // 2. Display the m-th record (0-indexed)
-    int m = 2; 
+    int m = 2;
     printf("\n--- Fetching Record at Index %d via fseek ---\n", m);
     displayMthRecord(filename, m);
 
-    // 3. Delete a record (Let's delete index 1)
     int delIdx = 1;
     printf("\n--- Deleting Record at Index %d ---\n", delIdx);
     deleteRecord(filename, delIdx);
 
-    // 4. Display file content again to verify
     printf("\n--- File Content After Deletion ---\n");
     displayAllRecords(filename);
 
@@ -45,48 +41,63 @@ int main() {
 
 // Function to store N records into a binary file
 void storeRecords(const char *filename, int n) {
-    FILE *file = fopen(filename, "wb"); // Write Binary
+    FILE *file = fopen(filename, "wb");
     if (file == NULL) {
         perror("Error opening file for writing");
         return;
     }
 
-    // Hardcoded sample data for demonstration
     struct Student data[] = {
-        {101, "Alice", 3.8},
-        {102, "Bob", 3.5},
-        {103, "Charlie", 3.9},
-        {104, "David", 3.2}
+        {101, "Alice", 3.8f},
+        {102, "Bob", 3.5f},
+        {103, "Charlie", 3.9f},
+        {104, "David", 3.2f}
     };
+    const int availableRecords = sizeof(data) / sizeof(data[0]);
+    int writeCount = n;
 
-    // Write the array of structures to the file in one go
-    fwrite(data, sizeof(struct Student), n, file);
-    
+    if (writeCount < 0) {
+        writeCount = 0;
+    } else if (writeCount > availableRecords) {
+        writeCount = availableRecords;
+        printf("Warning: requested %d records, but only %d sample records are available. Writing %d records.\n",
+               n, availableRecords, writeCount);
+    }
+
+    if (writeCount > 0) {
+        if (fwrite(data, sizeof(struct Student), writeCount, file) != (size_t)writeCount) {
+            perror("Error writing student records");
+        } else {
+            printf("Successfully stored %d records.\n", writeCount);
+        }
+    } else {
+        printf("No records were written to file.\n");
+    }
+
     fclose(file);
-    printf("Successfully stored %d records.\n", n);
 }
 
 // Function to fetch and display the m-th record using fseek
 void displayMthRecord(const char *filename, int m) {
-    FILE *file = fopen(filename, "rb"); // Read Binary
+    if (m < 0) {
+        printf("Error: invalid record index %d. Index must be non-negative.\n", m);
+        return;
+    }
+
+    FILE *file = fopen(filename, "rb");
     if (file == NULL) {
         perror("Error opening file for reading");
         return;
     }
 
     struct Student student;
-    
-    // Move file pointer to the m-th record position
-    // Offset = m * size of one structure
-    int seekStatus = fseek(file, m * sizeof(struct Student), SEEK_SET);
-    
-    if (seekStatus != 0) {
-        printf("Error: Record index out of bounds or seek failed.\n");
+    long offset = (long)m * (long)sizeof(struct Student);
+    if (fseek(file, offset, SEEK_SET) != 0) {
+        printf("Error: seek failed for index %d.\n", m);
         fclose(file);
         return;
     }
 
-    // Read exactly one structure from that position
     if (fread(&student, sizeof(struct Student), 1, file) == 1) {
         printf("Record %d -> ID: %d, Name: %s, GPA: %.2f\n", m, student.id, student.name, student.gpa);
     } else {
@@ -98,11 +109,22 @@ void displayMthRecord(const char *filename, int m) {
 
 // Function to delete a record using the Temp File method
 void deleteRecord(const char *filename, int recordIndex) {
-    FILE *file = fopen(filename, "rb");
-    FILE *tempFile = fopen("temp.bin", "wb");
+    if (recordIndex < 0) {
+        printf("Error: invalid record index %d. Index must be non-negative.\n", recordIndex);
+        return;
+    }
 
-    if (file == NULL || tempFile == NULL) {
-        perror("Error opening files during deletion");
+    const char *tempFilename = "temp.bin";
+    FILE *file = fopen(filename, "rb");
+    if (file == NULL) {
+        perror("Error opening source file for deletion");
+        return;
+    }
+
+    FILE *tempFile = fopen(tempFilename, "wb");
+    if (tempFile == NULL) {
+        perror("Error opening temporary file for deletion");
+        fclose(file);
         return;
     }
 
@@ -112,11 +134,13 @@ void deleteRecord(const char *filename, int recordIndex) {
 
     // Read record by record from original file
     while (fread(&student, sizeof(struct Student), 1, file) == 1) {
-        // If it's NOT the record we want to delete, copy it to temp file
         if (currentIndex != recordIndex) {
-            fwrite(&student, sizeof(struct Student), 1, tempFile);
+            if (fwrite(&student, sizeof(struct Student), 1, tempFile) != 1) {
+                perror("Error writing to temporary file");
+                break;
+            }
         } else {
-            deleted = 1; // Skip writing this record
+            deleted = 1;
         }
         currentIndex++;
     }
@@ -125,11 +149,18 @@ void deleteRecord(const char *filename, int recordIndex) {
     fclose(tempFile);
 
     if (deleted) {
-        remove(filename);             // Delete original file
-        rename("temp.bin", filename); // Rename temp file to original name
+        if (remove(filename) != 0) {
+            perror("Error removing original file");
+            remove(tempFilename);
+            return;
+        }
+        if (rename(tempFilename, filename) != 0) {
+            perror("Error renaming temporary file");
+            return;
+        }
         printf("Record %d successfully deleted.\n", recordIndex);
     } else {
-        remove("temp.bin"); // Clean up temp file if index wasn't found
+        remove(tempFilename);
         printf("Record index %d not found. No changes made.\n", recordIndex);
     }
 }
@@ -137,7 +168,10 @@ void deleteRecord(const char *filename, int recordIndex) {
 // Helper function to print the entire file
 void displayAllRecords(const char *filename) {
     FILE *file = fopen(filename, "rb");
-    if (file == NULL) return;
+    if (file == NULL) {
+        perror("Error opening file for display");
+        return;
+    }
 
     struct Student student;
     int idx = 0;
